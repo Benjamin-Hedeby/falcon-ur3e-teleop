@@ -1,0 +1,76 @@
+diff --git a/ur_controllers/include/ur_controllers/twist_controller.hpp b/ur_controllers/include/ur_controllers/twist_controller.hpp
+index 4046bd7..65120da 100644
+--- a/ur_controllers/include/ur_controllers/twist_controller.hpp
++++ b/ur_controllers/include/ur_controllers/twist_controller.hpp
+@@ -66,6 +66,7 @@ private:
+ 
+   realtime_tools::RealtimeThreadSafeBox<TwistStamped> received_twist_msg_;
+   TwistStamped command_msg_;
++  bool timed_out_ = false;  // currently commanding zero because commands stopped arriving
+ 
+   std::shared_ptr<twist_controller::ParamListener> param_listener_;
+   twist_controller::Params controller_params_;
+diff --git a/ur_controllers/src/twist_controller.cpp b/ur_controllers/src/twist_controller.cpp
+index f71a8a2..1b46949 100644
+--- a/ur_controllers/src/twist_controller.cpp
++++ b/ur_controllers/src/twist_controller.cpp
+@@ -46,11 +46,9 @@ controller_interface::CallbackReturn TwistController::on_configure(const rclcpp_
+           RCLCPP_WARN(get_node()->get_logger(), "Can't accept new commands. subscriber is inactive");
+           return;
+         }
+-        if ((msg->header.stamp.sec == 0) && (msg->header.stamp.nanosec == 0)) {
+-          RCLCPP_WARN_ONCE(get_node()->get_logger(), "Received TwistStamped with zero timestamp, setting it to current "
+-                                                     "time, this message will only be shown once");
+-          msg->header.stamp = get_node()->now();
+-        }
++        // Stamp with the arrival time: update() uses it for the command timeout, so a sender that
++        // dies (or a clock offset between machines) can't keep the robot moving.
++        msg->header.stamp = get_node()->now();
+ 
+         if (msg->header.frame_id != controller_params_.tf_prefix + "base") {
+           // TODO(urfeex): Support transforming the twist?
+@@ -61,8 +59,6 @@ controller_interface::CallbackReturn TwistController::on_configure(const rclcpp_
+           return;
+         }
+ 
+-        // TODO(urfeex): Check timestamp. Do not accept old commands.
+-
+         received_twist_msg_.set(*msg);
+       });
+ 
+@@ -120,7 +116,18 @@ controller_interface::return_type TwistController::update(const rclcpp::Time& /*
+     command_msg_ = current_cmd.value();
+   }
+ 
+-  // TODO(urfeex): Check if the command_msg_ is valid, e.g., if the timestamp is not too old.
++  // Command zero velocity if no new command arrived within command_timeout
++  const double timeout = controller_params_.command_timeout;
++  const rclcpp::Time stamp(command_msg_.header.stamp, get_node()->get_clock()->get_clock_type());
++  const bool stale = timeout > 0.0 && (get_node()->now() - stamp).seconds() > timeout;
++  if (stale) {
++    if (!timed_out_ && (command_msg_.header.stamp.sec != 0 || command_msg_.header.stamp.nanosec != 0)) {
++      RCLCPP_WARN(get_node()->get_logger(), "No twist command for %.3f s, commanding zero velocity.", timeout);
++    }
++    // Zero only the local copy; writing the shared box here could overwrite a command that just arrived
++    command_msg_.twist = geometry_msgs::msg::Twist();
++  }
++  timed_out_ = stale;
+ 
+   bool success = true;
+   success &= command_interfaces_[0].set_value(command_msg_.twist.linear.x);
+diff --git a/ur_controllers/src/twist_controller_parameters.yaml b/ur_controllers/src/twist_controller_parameters.yaml
+index f20f6b4..29d45be 100644
+--- a/ur_controllers/src/twist_controller_parameters.yaml
++++ b/ur_controllers/src/twist_controller_parameters.yaml
+@@ -5,3 +5,11 @@ twist_controller:
+     default_value: "",
+     description: "URDF prefix of the corresponding arm"
+   }
++  command_timeout: {
++    type: double,
++    default_value: 0.1,
++    description: "Seconds without a new twist command after which zero velocity is commanded. 0 disables the timeout.",
++    validation: {
++      gt_eq<>: [0.0]
++    }
++  }

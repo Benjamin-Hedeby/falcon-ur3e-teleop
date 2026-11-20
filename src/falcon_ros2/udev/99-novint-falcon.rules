@@ -1,0 +1,2 @@
+# Novint Falcon (FTDI-based). Lets non-root users access it.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="cb48", MODE="0666"

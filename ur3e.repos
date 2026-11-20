@@ -1,0 +1,7 @@
+# Third-party ROS packages, at the versions used here:  vcs import src < ur3e.repos
+# then apply patches/ur_driver_twist_timeout.patch to the driver (see README).
+repositories:
+  Universal_Robots_ROS2_Driver:
+    type: git
+    url: https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver.git
+    version: 2c1432af67fbe859371756111d4bc6c30d5c99e6  # jazzy branch

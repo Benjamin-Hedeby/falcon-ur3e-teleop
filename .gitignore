@@ -1,0 +1,25 @@
+# The repository root is a ROS 2 workspace; only these parts are tracked
+/*
+!/.gitignore
+!/README.md
+!/ur3e.repos
+!/cad/
+!/docs/
+!/patches/
+!/src/
+/src/*
+!/src/falcon_ros2/
+!/mujoco/
+/mujoco/*
+!/mujoco/requirements.txt
+!/mujoco/peg_in_hole/
+!/mujoco/third_party/
+/mujoco/peg_in_hole/outputs/
+/mujoco/peg_in_hole/_variants/
+/mujoco/peg_in_hole/run_on.txt
+__pycache__/
+.pytest_cache/
+*.pyc
+# Unused first attempt (CoACD pieces); the simulation uses hole_tile*/peg_slab*
+/mujoco/peg_in_hole/meshes/hole_collision_*.obj
+/mujoco/peg_in_hole/meshes/n_hole_pieces.txt

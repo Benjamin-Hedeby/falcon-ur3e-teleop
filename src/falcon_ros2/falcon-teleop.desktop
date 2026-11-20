@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Falcon UR3e Teleop
+Comment=Teleoperate the UR3e (or a simulation) with the Novint Falcon
+Exec=gnome-terminal --title="Falcon UR3e teleop" -- bash /home/dev_computer/ur3e_ws/src/falcon_ros2/scripts/launch_falcon_teleop.sh
+Icon=input-gaming
+Terminal=false
+Categories=Development;

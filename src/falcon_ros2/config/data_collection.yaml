@@ -1,0 +1,14 @@
+# Parameter preset for contact-data collection (admittance tuning). Load into a running bridge:
+#   ros2 param load /falcon_ur_teleop $(ros2 pkg prefix falcon_ros2)/share/falcon_ros2/config/data_collection.yaml
+# Slow, short-lead motion so the arm never runs far ahead of the tool, and a contact limit.
+falcon_ur_teleop:
+  ros__parameters:
+    rate_max_speed: 0.02
+    rate_boost_max_speed: 0.04
+    max_tcp_speed: 0.05
+    max_lead: 0.01
+    ft_deadband: 0.0
+    ft_gain: 0.2          # keep identical across all trials
+    ft_filter_hz: 5.0     # keep identical across all trials
+    contact_force_limit: 20.0
+    contact_torque_limit: 2.0

@@ -1,0 +1,15 @@
+# MuJoCo peg-in-hole simulation (mujoco/peg_in_hole). Versions tested together on Ubuntu 24.04,
+# Python 3.12:  python3 -m venv mujoco/.venv && mujoco/.venv/bin/pip install -r mujoco/requirements.txt
+mujoco==3.1.6
+numpy==2.5.4
+scipy==1.18.1
+matplotlib==3.9.4
+trimesh==5.2.0
+networkx==3.7
+shapely==2.2.0
+rtree==1.4.1
+coacd==1.0.14
+imageio[ffmpeg]==2.38.1
+pillow==13.0.0
+glfw==2.11.0
+PyYAML==6.0.3   # rclpy (from ROS's PYTHONPATH) needs it inside the venv for sim_ros.py
