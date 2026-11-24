@@ -1,0 +1,15 @@
+trial,mode,ft_gain,rate_spring,adm_damping_xy,adm_mass_xy,adm_stiffness_xy,force_limit_N,torque_limit_Nm,peak_force_N,mean_contact_force_N,first_contact_z_mm,contact_time_s,final_z_mm,limit_trips,trips_before_seating,trip_types,rating_smoothness,rating_effort,rating_compliance,rating_note,op_best_r,op_best_lag_s,op_gain_mm_s_per_N,op_axis
+20261124-095204_op1_ff_insert_r01,force feedback only,0.2,50.0,,,,20.0,2.0,23.6,14.6,296,45.5,218.2,7,5,force+force+force+force+force+torque+force,,,,,0.67,0.8,0.53,y
+20261124-095809_op1_ff_insert_r02,force feedback only,0.2,50.0,,,,25.0,2.0,25.3,16.4,253,21.7,218.6,6,3,torque+torque+torque+force+force+force,,,,,0.71,0.8,0.23,x
+20261124-101121_op1_ff_insert_g04_r01,force feedback only,0.4,50.0,,,,25.0,2.0,11.7,5.9,311,15.3,217.8,1,0,torque,,,,,0.82,0.3,0.76,x
+20261124-101937_op1_ff_insert_g04_r02,force feedback only,0.4,50.0,,,,25.0,2.0,26.2,19.0,256,15.4,218.6,4,4,force+force+force+torque,,,,,0.81,0.45,0.27,x
+20261124-102715_op1_ff_insert_g04_s20_r01,force feedback only,0.4,20.0,,,,25.0,2.0,19.5,6.8,247,4.7,218.6,1,0,torque,,,,,0.84,0.2,0.99,x
+20261124-103333_op1_ff_insert_g04_s20_r02,force feedback only,0.4,20.0,,,,25.0,2.0,11.4,6.8,268,9.7,217.5,1,0,torque,,,,,0.68,0.8,0.33,y
+20261124-103739_op1_ff_insert_g04_s20_r03,force feedback only,0.4,20.0,,,,25.0,2.0,15.3,11.7,280,20.3,223.1,4,4,torque+torque+torque+torque,,,,,0.72,0.5,0.84,x
+20261124-104246_op1_adm_d1000_r01,admittance,0.4,20.0,1000.0,40.0,400.0,25.0,2.0,14.9,7.2,298,17.8,217.5,2,1,torque+torque,,,,"felt good (free text, before multiple-choice ratings)",,,,
+20261124-104803_op1_adm_d600_void,void,0.4,20.0,,,,25.0,2.0,14.4,5.7,256,6.0,218.0,0,0,,,,,,,,,
+20261124-105237_op1_adm_d600_r01,admittance,0.4,20.0,600.0,24.0,400.0,25.0,2.0,10.1,6.3,235,4.4,218.2,1,0,torque,very smooth,a little,about right,,,,,
+20261124-105629_op1_adm_d1500_r01,admittance,0.4,20.0,1500.0,60.0,400.0,25.0,2.0,12.4,5.5,300,14.8,217.5,1,0,torque,very smooth,a little,about right,,,,,
+20261124-110430_op1_adm_d600_r02,admittance,0.4,20.0,600.0,24.0,400.0,25.0,2.0,10.8,4.7,297,13.0,217.7,1,0,torque,mostly smooth,a little,about right,,,,,
+20261124-110830_op1_adm_d1500_r02,admittance,0.4,20.0,1500.0,60.0,400.0,25.0,2.0,9.7,5.0,287,11.9,217.8,1,0,torque,very smooth,a little,about right,,,,,
+20261124-111226_op1_adm_d1000_r02,admittance,0.4,20.0,1000.0,40.0,400.0,25.0,2.0,10.0,3.9,293,12.4,217.9,1,0,torque,very smooth,none,about right,,,,,

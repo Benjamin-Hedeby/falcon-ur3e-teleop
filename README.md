@@ -25,7 +25,7 @@ The repository root is a ROS 2 workspace.
 | `cad/` | Peg (`Housing_Folding_Gripper_v2.STL`) and socket (`BLANKET_SEGM_OUTBOARD_MIDDLE_GRIPPER_v2.STL`), in mm |
 | `patches/` | `ur_driver_twist_timeout.patch`: zero velocity if twist commands stop for 0.1 s |
 | `ur3e.repos` | The UR ROS 2 driver version used |
-| `docs/` | Data-collection spec |
+| `docs/` | Data-collection spec; [admittance tuning results](docs/admittance-tuning/README.md) (real-robot trials, figures, per-trial summary) |
 
 ## Setup
 
@@ -95,10 +95,15 @@ ros2 run falcon_ros2 record_trial.sh <operator> <condition> <repeat> ~/trials   
 ros2 run falcon_ros2 analyze_trial.py ~/trials/<name> ~/trials/<name>.csv
 ```
 
-`record_trial.sh` zeroes the wrist sensor, saves the bridge parameters and trial metadata, logs
-the bridge CSV and records a bag. `analyze_trial.py` resamples a trial to 500 Hz: tool pose,
+`record_trial.sh` zeroes the wrist sensor and the bridge's contact limit (which keeps that zero
+for the whole trial, so start with the arm still and out of contact), saves the bridge parameters
+and trial metadata, logs the bridge CSV and records a bag. After a contact-limit trip, release and
+re-press the clutch; if the contact is still over the limit, only motion away from it is allowed
+until it drops below the limit. `analyze_trial.py` resamples a trial to 500 Hz: tool pose,
 Savitzky-Golay velocity and acceleration, wrench in sensor and base frames, commanded target and
-contact detection, plus force plots. See `docs/data-collection-changes.md`.
+contact detection, plus force plots. `fit_admittance.py` fits M, D, K to an operator's response to the
+felt force. See `docs/data-collection-changes.md`, and `docs/admittance-tuning/` for how the current
+admittance defaults (sideways D 1000 Ns/m, M 40 kg, K 400 N/m) were chosen.
 
 ## Tests
 
