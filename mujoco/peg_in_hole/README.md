@@ -13,7 +13,7 @@ cd ~/ur3e_ws/mujoco/peg_in_hole
 ../.venv/bin/python sim.py --viewer           # watch it live in the MuJoCo viewer
 ../.venv/bin/python sim.py --video            # also save insertion.mp4 (with a text overlay)
 ../.venv/bin/python sim.py --offset 0.015 0.0 --speed 0.01 \
-    --mass 60 60 60 --damping 1500 1500 1000 --stiffness 400 400 0
+    --mass 40 40 60 --damping 1000 1000 1000 --stiffness 400 400 0
 ```
 
 Results go to `outputs/<time>_<label>/`: `summary.txt`, `data.csv`, `insertion.png`, and

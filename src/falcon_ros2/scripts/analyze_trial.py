@@ -17,6 +17,8 @@ CSV's name. Columns of the processed CSV (vectors in base_link unless noted):
                             mode or between clutch periods)
   f_mag                     N, |force|
   in_contact                0/1: f_mag above mean + 5 std of the first 1 s with the clutch held
+  cmd_vx..cmd_vz            m/s, commanded tool velocity from /twist_controller/twist (twist
+                            mode; held between commands; NaN without the topic)
 """
 import argparse
 import csv
@@ -40,6 +42,7 @@ CONTACT_SIGMA = 5.0
 
 WRENCH = '/force_torque_sensor_broadcaster/wrench'
 TARGET = '/falcon_ur_teleop/target'
+TWIST = '/twist_controller/twist'
 CLUTCH = '/falcon_ur_teleop/clutch'
 TRIPPED = '/falcon_ur_teleop/limit_tripped'
 
@@ -126,6 +129,15 @@ def main():
         except Exception:
             return None
 
+    # Some bags lack robot_state_publisher's joint TFs, so tool0 isn't connected to base_link;
+    # the controller's own TCP pose (base -> tool0_controller) is then the only tool pose.
+    w_mid = stamp_of(*reversed(data[WRENCH][len(data[WRENCH]) // 2]))
+    if lookup('base_link', args.tool_frame, w_mid) is None and \
+            lookup('base_link', 'tool0_controller', w_mid) is not None:
+        print(f'Warning: base_link -> {args.tool_frame} is not in the bag\'s TF tree; using '
+              'tool0_controller (the pendant TCP, e.g. the peg tip, not the flange)', file=sys.stderr)
+        args.tool_frame = 'tool0_controller'
+
     # Wrench samples: raw (own frame) and rotated into base_link at their own stamps
     w_t, w_raw, w_base = [], [], []
     for t_recv, m in data[WRENCH]:
@@ -158,8 +170,10 @@ def main():
             pos[k] = (p.x, p.y, p.z)
     valid = np.all(np.isfinite(pos), axis=1)
     if valid.sum() < SG_WINDOW:
-        sys.exit(f'Too few TF poses for base_link -> {args.tool_frame} (frames in the bag: '
-                 f'{sorted(tf.all_frames_as_string().split())[:6]}...)')
+        frames = sorted({tr.child_frame_id for topic in ('/tf', '/tf_static')
+                         for _, m in data.get(topic, []) for tr in m.transforms})
+        sys.exit(f'Too few TF poses for base_link -> {args.tool_frame} (child frames in the bag: '
+                 f'{", ".join(frames)})')
     # Fill short TF gaps so the filter runs over them; the filled samples stay marked NaN in x/y/z
     filled = pos.copy()
     for k in range(3):
@@ -178,6 +192,27 @@ def main():
         p = m.pose.position
         tg_v.append((p.x, p.y, p.z))
     target = interp_gapped(grid, np.array(tg_t), np.array(tg_v).reshape(-1, 3))
+
+    # Commanded velocity (twist mode): frame 'base', rotated into base_link, held between commands
+    cmd = np.full((len(grid), 3), np.nan)
+    tw = data.get(TWIST, [])
+    if tw:
+        c_t, c_v = [], []
+        for t_recv, m in tw:
+            t = stamp_of(m, t_recv)
+            tr = lookup('base_link', m.header.frame_id or 'base', t)
+            if tr is None:
+                continue
+            lin = m.twist.linear
+            c_t.append(t)
+            c_v.append(rotate(tr.transform.rotation, (lin.x, lin.y, lin.z)))
+        if c_t:
+            c_t = np.array(c_t)
+            order = np.argsort(c_t)
+            c_t, c_v = c_t[order], np.array(c_v)[order]
+            i = np.searchsorted(c_t, grid, side='right') - 1
+            ok = (i >= 0) & (grid - c_t[np.clip(i, 0, None)] <= MAX_GAP)
+            cmd[ok] = c_v[i[ok]]
 
     def bool_topic(topic):
         msgs = data.get(topic, [])
@@ -202,10 +237,12 @@ def main():
 
     cols = (['t', 'clutch', 'limit_tripped', 'x', 'y', 'z', 'vx', 'vy', 'vz', 'ax', 'ay', 'az']
             + [c + '_raw' for c in ('fx', 'fy', 'fz', 'tx', 'ty', 'tz')]
-            + ['fx', 'fy', 'fz', 'tx', 'ty', 'tz', 'target_x', 'target_y', 'target_z', 'f_mag', 'in_contact'])
-    table = np.column_stack([grid - t0, clutch, tripped, pos, vel, acc, wr, wb, target, fmag, in_contact])
+            + ['fx', 'fy', 'fz', 'tx', 'ty', 'tz', 'target_x', 'target_y', 'target_z', 'f_mag', 'in_contact',
+               'cmd_vx', 'cmd_vy', 'cmd_vz'])
+    table = np.column_stack([grid - t0, clutch, tripped, pos, vel, acc, wr, wb, target, fmag, in_contact,
+                             cmd])
     out_csv = out_dir / f'{name}_processed.csv'
-    np.savetxt(out_csv, table, delimiter=',', header=','.join(cols), comments='', fmt='%.6g')
+    np.savetxt(out_csv, table, delimiter=',', header=','.join(cols), comments='', fmt='%.9g')
 
     import matplotlib
     matplotlib.use('Agg')

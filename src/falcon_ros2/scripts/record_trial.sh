@@ -4,7 +4,8 @@
 #   ros2 run falcon_ros2 record_trial.sh <operator> <condition> <repeat> [outdir]
 #   e.g.  ros2 run falcon_ros2 record_trial.sh op1 off+1mm_careful 03 ~/trials
 #
-# Start it with the arm still and out of contact (the wrist sensor is zeroed first), drive the
+# Start it with the arm still and out of contact (the wrist sensor and the bridge's contact
+# limit are zeroed first, and the contact limit keeps that zero for the whole trial), drive the
 # trial, then press Ctrl+C: the bag is closed, the bridge stops logging, and the files are listed.
 # Files: <outdir>/<name>/ (bag), <name>.csv, <name>_params.yaml, <name>_meta.yaml, with
 # <name> = <YYYYMMDD-HHMMSS>_<operator>_<condition>_r<repeat>.
@@ -46,7 +47,7 @@ ros_list() {
 die() { echo "ERROR: $*" >&2; exit 1; }
 
 if [ $# -lt 3 ] || [ $# -gt 4 ]; then
-  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 fi
 OPERATOR=$1 CONDITION=$2 REPEAT=$3 OUTDIR=${4:-$HOME/trials}
@@ -80,6 +81,17 @@ else
   warn "$ZERO_SRV not available (simulation?); continuing without zeroing"
   ZEROED=false
 fi
+# The bridge's contact limit keeps one zero for the whole trial: take it now (after the sensor
+# zero has settled), with the arm still and out of contact
+sleep 0.3
+if timeout 10 ros2 service call "$NODE/zero_contact_limit" std_srvs/srv/Trigger 2>/dev/null \
+    | grep -q "success=True"; then
+  echo "  contact-limit zero taken for this trial"
+  CL_ZEROED=true
+else
+  warn "could not zero the bridge's contact limit (it will zero at the first clutch press instead)"
+  CL_ZEROED=false
+fi
 
 # 4. Parameters and metadata
 ros2 param dump "$NODE" > "$PARAMS" 2>/dev/null || warn "could not dump the bridge parameters"
@@ -91,6 +103,7 @@ repeat: '$REPEAT'
 start_time: '$(date --iso-8601=seconds)'
 bridge_mode: '${MODE:-unknown}'
 ft_sensor_zeroed: $ZEROED
+contact_limit_zeroed: $CL_ZEROED
 ros_domain_id: '${ROS_DOMAIN_ID:-0}'
 host: '$(hostname)'
 bag: '$BAG'

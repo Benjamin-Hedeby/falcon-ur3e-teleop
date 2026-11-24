@@ -30,11 +30,15 @@ clutch is pressed, rotated into base_link, low-pass filtered and rendered on the
 modes. force_feedback:=false turns contact feedback off (wrist sensor and Gazebo contacts; the
 joystick centring spring stays), live too: ros2 param set /falcon_ur_teleop force_feedback false
 
-Contact limit (safety, all modes): the contact wrench (wrist sensor minus its reading just after
-the clutch was pressed, ~50 Hz low-pass) is checked in the force loop against contact_force_limit
-and contact_torque_limit. A trip stops the arm (cancels the trajectory goal / commands zero
-twist), optionally backs off contact_backoff along the contact force, and ignores the Falcon
-until the clutch is released and pressed again. State on ~/limit_tripped and in the CSV.
+Contact limit (safety, all modes): the contact wrench (wrist sensor minus one zero kept for the
+whole trial, ~50 Hz low-pass) is checked in the force loop against contact_force_limit and
+contact_torque_limit. The zero is taken by ~/zero_contact_limit (std_srvs/Trigger; record_trial.sh
+calls it at the start of a trial, arm still and out of contact), or else at the first clutch
+press. It is not retaken on later presses, so a force left over from a contact still counts.
+A trip stops the arm (cancels the trajectory goal / commands zero twist), optionally backs off
+contact_backoff along the contact force, and ignores the Falcon until the clutch is released and
+pressed again. If the contact is still over the limit on that press, only motion away from the
+contact is allowed until it drops below the limit. State on ~/limit_tripped and in the CSV.
 
 Data collection: ~/target (PoseStamped, base_link, flange = tool0, every command tick while the
 clutch is held, rate/position modes), ~/clutch and ~/limit_tripped (Bool, every command tick).
@@ -86,7 +90,7 @@ from std_msgs.msg import Bool, Float64
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 from admittance_insert import AdmittanceInsert, AdmittanceParams, AdmittanceStop
-from contact_limit import ContactLimit
+from contact_limit import ContactLimit, away_only
 from moveit_msgs.srv import GetPositionIK
 from moveit_msgs.msg import PositionIKRequest
 from rcl_interfaces.msg import ParameterDescriptor, SetParametersResult
@@ -168,8 +172,8 @@ INSERT_GAIN_SCALING = 0.5       # insert_gain_scaling: UR force mode gain scalin
 # X, Y, Z in base_link. Z has no spring, so pressing on a hard stop at Falcon speed v settles at
 # F = D_z * v: D_z sets the insertion force per unit commanded speed.
 INSERT_METHOD = 'admittance'          # insert_method: 'admittance' or 'force_mode'
-ADM_MASS = [60.0, 60.0, 60.0]          # adm_mass: kg (virtual); M/D is the response time
-ADM_DAMPING = [1500.0, 1500.0, 1000.0]  # adm_damping: N s/m; steady speed = F / D
+ADM_MASS = [40.0, 40.0, 60.0]          # adm_mass: kg (virtual); M/D is the response time (40 ms sideways)
+ADM_DAMPING = [1000.0, 1000.0, 1000.0]  # adm_damping: N s/m; steady speed = F / D (sideways: 2026-11-24 sweep)
 ADM_STIFFNESS = [400.0, 400.0, 0.0]     # adm_stiffness: N/m; steady deflection = F / K
 ADM_FILTER_HZ = 10.0         # adm_filter_hz: low-pass on the force input (0 = off)
 ADM_DEADBAND = 1.0           # adm_deadband: N, force magnitude ignored (sensor noise -> drift)
@@ -198,6 +202,8 @@ LOG_COLUMNS = [
                                                #    sensor's reference point (the TCP on the UR)
     'limit_tripped',                           # 0/1, contact limit latched
     'ros_time',                                # s, node clock (matches bag timestamps)
+    'limit_recovering',                        # 0/1, tripped and re-pressed while still over the
+                                               #    limit: only motion away from the contact
 ]
 
 CONTACT_TIMEOUT = 0.05  # s, how long a reported contact counts as ongoing
@@ -297,7 +303,9 @@ class FalconURTeleop(Node):
         self.ft_time = None
         self.ft_bias = None          # sensor force (base_link) just after the clutch was pressed
         self.contact = ContactLimit()
-        self.cl_bias = None          # (force, torque) zero for the contact limit, set like ft_bias
+        self.cl_bias = None          # (force, torque) zero for the contact limit, kept for the trial
+        self.cl_zero_request = False  # ~/zero_contact_limit called: zero on the next reading
+        self.cl_restart_filter = True  # start the contact filter from the current value
         self.cl_engaged = False      # engaged at the previous force tick (to catch the press)
         self.cl_wrench = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))  # filtered contact (force, torque)
         self.backoff_left = 0.0      # m of backoff still to move (twist mode)
@@ -315,6 +323,7 @@ class FalconURTeleop(Node):
         self.target_pub = self.create_publisher(PoseStamped, '~/target', 10)
         self.clutch_pub = self.create_publisher(Bool, '~/clutch', 10)
         self.tripped_pub = self.create_publisher(Bool, '~/limit_tripped', 10)
+        self.create_service(Trigger, '~/zero_contact_limit', self.on_zero_contact_limit)
         self.create_subscription(
             Float64, '/speed_scaling_state_broadcaster/speed_scaling',
             lambda m: setattr(self, 'speed_scaling', m.data), 10)
@@ -450,6 +459,7 @@ class FalconURTeleop(Node):
         row += [f'{c:.5f}' for c in (torque or nan3)]
         row.append(int(self.contact.tripped))
         row.append(f'{self.get_clock().now().nanoseconds * 1e-9:.4f}')
+        row.append(int(self.contact.recovering))
         self.log[1].writerow(row)
         self.log_rows += 1
         if self.log_rows % int(FF_RATE) == 0:  # flush about once a second
@@ -652,9 +662,10 @@ class FalconURTeleop(Node):
                         f = tuple(c * FF_MAX_FORCE / fmag for c in f)
         ft = (0.0, 0.0, 0.0)
         engaged = self.clutch and self.center_falcon is not None
-        wrench = self.ft_wrench_in_base_link() if engaged or self.log else None
+        wrench = self.ft_wrench_in_base_link() if engaged or self.log or self.cl_zero_request \
+            else None
         sensor = wrench[0] if wrench is not None else None
-        self.check_contact_limit(wrench if engaged else None, engaged)
+        self.check_contact_limit(wrench, engaged)
         if engaged:
             ft = self.ft_feedback(sensor)
             f = tuple(f[i] + ft[i] for i in range(3))
@@ -672,34 +683,57 @@ class FalconURTeleop(Node):
 
     # --- Contact limit ------------------------------------------------------------------------
 
+    def on_zero_contact_limit(self, req, res):
+        """Retake the contact-limit zero on the next sensor reading (arm still, out of contact)."""
+        self.cl_zero_request = True
+        res.success = True
+        res.message = 'contact-limit zero will be taken from the next wrist-sensor reading'
+        return res
+
     def check_contact_limit(self, wrench, engaged):
         """Every force tick: filter the contact wrench and update the latching contact limit."""
-        was_tripped = self.contact.tripped
+        was_tripped, was_recovering = self.contact.tripped, self.contact.recovering
+        if wrench is not None and (self.cl_zero_request or (engaged and self.cl_bias is None)):
+            self.cl_bias = wrench
+            self.cl_restart_filter = True
+            self.get_logger().info(
+                'Contact-limit zero taken ' + ('(~/zero_contact_limit)' if self.cl_zero_request else
+                                               'at the first clutch press; kept for the trial'))
+            self.cl_zero_request = False
         if engaged and not self.cl_engaged:
-            self.cl_bias = None  # clutch just pressed: zero on the next reading
+            self.cl_restart_filter = True  # a re-press under load must not ramp up from zero
         self.cl_engaged = engaged
         contact = None
-        if wrench is not None:
-            if self.cl_bias is None:  # first reading after the clutch was pressed: the zero
-                self.cl_bias = wrench
-                self.cl_wrench = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+        if engaged and wrench is not None and self.cl_bias is not None:
+            raw = tuple(tuple(wrench[k][i] - self.cl_bias[k][i] for i in range(3)) for k in range(2))
+            if self.cl_restart_filter:
+                self.cl_wrench = raw
+                self.cl_restart_filter = False
             else:
                 dt = 1.0 / FF_RATE
                 a = dt / (dt + 1.0 / (2.0 * math.pi * CONTACT_FILTER_HZ))
-                self.cl_wrench = tuple(
-                    tuple(p + a * ((wrench[k][i] - self.cl_bias[k][i]) - p)
-                          for i, p in enumerate(self.cl_wrench[k]))
-                    for k in range(2))
-                contact = self.cl_wrench
+                self.cl_wrench = tuple(tuple(p + a * (raw[k][i] - p)
+                                             for i, p in enumerate(self.cl_wrench[k]))
+                                       for k in range(2))
+            contact = self.cl_wrench
         tripped_now = self.contact.update(
             contact[0] if contact else None, contact[1] if contact else None, engaged,
             self.contact_force_limit, self.contact_torque_limit)
         if tripped_now:
             self.on_contact_trip(contact[0])
+        if self.contact.recovering and not was_recovering:
+            self.get_logger().warn(
+                f'Contact limit: {self.contact.reason} on re-press. Only motion away from the '
+                'contact is allowed until it drops below the limit.', throttle_duration_sec=1.0)
         if self.contact.tripped != was_tripped:
             self.tripped_pub.publish(Bool(data=self.contact.tripped))
             if not self.contact.tripped:
-                self.get_logger().info('Contact limit cleared (clutch re-pressed)')
+                self.get_logger().info('Contact limit cleared' + (
+                    ' (moved away from the contact)' if was_recovering else ' (clutch re-pressed)'))
+
+    def contact_away(self):
+        """The filtered contact force on the tool (base_link): points away from the contact."""
+        return tuple(self.ft_sign * c for c in self.cl_wrench[0])
 
     def on_contact_trip(self, force):
         """Stop the arm, optionally back off along the contact force, and log."""
@@ -825,7 +859,7 @@ class FalconURTeleop(Node):
         self.tripped_pub.publish(Bool(data=self.contact.tripped))
 
         v = (0.0, 0.0, 0.0)
-        if self.contact.tripped:
+        if self.contact.tripped and not self.contact.recovering:
             # Contact limit: the Falcon is ignored; only the optional backoff moves the arm
             if self.backoff_left > 0.0:
                 step = min(BACKOFF_SPEED * dt, self.backoff_left)
@@ -836,6 +870,8 @@ class FalconURTeleop(Node):
             if self.insert and self.insert_method == 'force_mode':
                 v = (0.0, 0.0, v[2])  # X/Y belong to force mode while inserting
             v = tuple(v[i] + v_adm[i] for i in range(3))
+            if self.contact.recovering:
+                v = away_only(v, self.contact_away())  # still over the limit: only away
             speed = math.sqrt(sum(c * c for c in v))
             if speed > self.max_tcp_speed:
                 v = tuple(c * self.max_tcp_speed / speed for c in v)
@@ -1038,7 +1074,8 @@ class FalconURTeleop(Node):
         self.clutch_pub.publish(Bool(data=self.clutch))
         self.tripped_pub.publish(Bool(data=self.contact.tripped))
 
-        if not self.clutch or self.center_falcon is None or self.contact.tripped:
+        if (not self.clutch or self.center_falcon is None
+                or (self.contact.tripped and not self.contact.recovering)):
             return
         if not self.ik_client.service_is_ready() or not self.traj_client.server_is_ready():
             return
@@ -1049,6 +1086,11 @@ class FalconURTeleop(Node):
             tx, ty, tz = (self.last_target[i] + v[i] * dt for i in range(3))
         else:
             tx, ty, tz = self.compute_target()
+        if self.contact.recovering:
+            # Still over the contact limit: only the part of the move away from the contact
+            d = away_only((tx - self.last_target[0], ty - self.last_target[1],
+                           tz - self.last_target[2]), self.contact_away())
+            tx, ty, tz = (self.last_target[i] + d[i] for i in range(3))
         # Rate-limit the commanded TCP toward the hand's target
         lx, ly, lz = self.last_target
         step = math.sqrt((tx - lx) ** 2 + (ty - ly) ** 2 + (tz - lz) ** 2)
@@ -1152,7 +1194,8 @@ class FalconURTeleop(Node):
             return
         self.goal_handle = handle
         # Released, or the contact limit tripped, while this goal was in flight
-        if retreat is None and (not self.clutch or self.contact.tripped):
+        if retreat is None and (not self.clutch or
+                                (self.contact.tripped and not self.contact.recovering)):
             self.stop_robot()
 
     def on_ik_response(self, future, retreat=None):
@@ -1162,7 +1205,8 @@ class FalconURTeleop(Node):
             self.get_logger().warn(f'IK call failed: {e}')
             return
         # Released, or the contact limit tripped, while IK was running: don't move
-        if retreat is None and (not self.clutch or self.contact.tripped):
+        if retreat is None and (not self.clutch or
+                                (self.contact.tripped and not self.contact.recovering)):
             return
         if res.error_code.val != 1:  # moveit_msgs/MoveItErrorCodes.SUCCESS
             code = res.error_code.val

@@ -17,8 +17,8 @@ class AdmittanceStop(Exception):
 
 @dataclass
 class AdmittanceParams:
-    mass: list = field(default_factory=lambda: [60.0, 60.0, 60.0])         # kg (virtual)
-    damping: list = field(default_factory=lambda: [1500.0, 1500.0, 1000.0])  # N s/m
+    mass: list = field(default_factory=lambda: [40.0, 40.0, 60.0])         # kg (virtual)
+    damping: list = field(default_factory=lambda: [1000.0, 1000.0, 1000.0])  # N s/m; sideways from the 2026-11-24 sweep
     stiffness: list = field(default_factory=lambda: [400.0, 400.0, 0.0])     # N/m
     filter_hz: float = 10.0         # low-pass on the force input (0 = off)
     deadband: float = 1.0           # N, force magnitude ignored

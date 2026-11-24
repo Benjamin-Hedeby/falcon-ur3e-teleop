@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from contact_limit import ContactLimit, exceeds_limit  # noqa: E402
+from contact_limit import ContactLimit, away_only, exceeds_limit  # noqa: E402
 
 ZERO = (0.0, 0.0, 0.0)
 
@@ -41,12 +41,41 @@ def test_latched_until_clutch_released_and_pressed_again():
     assert cl.update(small, ZERO, True, 20.0, 2.0) is False and not cl.tripped
 
 
-def test_repress_while_still_over_the_limit_trips_again():
+def test_repress_while_still_over_the_limit_recovers():
+    cl = ContactLimit()
+    big, small = (0.0, 0.0, 30.0), (0.0, 0.0, 1.0)
+    assert cl.update(big, ZERO, True, 20.0, 2.0) is True
+    assert not cl.recovering  # holding the clutch from the trip: just stopped
+    cl.update(big, ZERO, False, 20.0, 2.0)
+    # Re-pressed while still over the limit: stays tripped, only motion away allowed
+    assert cl.update(big, ZERO, True, 20.0, 2.0) is False
+    assert cl.tripped and cl.recovering
+    assert cl.update(big, ZERO, True, 20.0, 2.0) is False and cl.recovering
+    # Moved away, contact below the limit: cleared while the clutch is still held
+    assert cl.update(small, ZERO, True, 20.0, 2.0) is False
+    assert not cl.tripped and not cl.recovering
+    # ...and armed again
+    assert cl.update(big, ZERO, True, 20.0, 2.0) is True
+
+
+def test_release_during_recovery_needs_another_press():
     cl = ContactLimit()
     big = (0.0, 0.0, 30.0)
-    assert cl.update(big, ZERO, True, 20.0, 2.0) is True
+    cl.update(big, ZERO, True, 20.0, 2.0)
     cl.update(big, ZERO, False, 20.0, 2.0)
-    assert cl.update(big, ZERO, True, 20.0, 2.0) is True and cl.tripped
+    cl.update(big, ZERO, True, 20.0, 2.0)
+    assert cl.recovering
+    cl.update(big, ZERO, False, 20.0, 2.0)
+    assert cl.tripped and not cl.recovering
+
+
+def test_away_only_removes_motion_into_the_contact():
+    away = (0.0, 0.0, 10.0)  # environment pushes the tool up: the obstacle is below
+    assert away_only((0.0, 0.0, -0.01), away) == (0.0, 0.0, 0.0)        # into it: blocked
+    assert away_only((0.0, 0.0, 0.01), away) == (0.0, 0.0, 0.01)        # away: allowed
+    v = away_only((0.01, 0.0, -0.01), away)                             # sideways kept,
+    assert abs(v[0] - 0.01) < 1e-12 and abs(v[2]) < 1e-12               # downward part removed
+    assert away_only((0.0, 0.0, 0.01), (0.0, 0.0, 0.5)) == (0.0, 0.0, 0.0)  # no direction known
 
 
 def test_nothing_checked_while_released_or_without_data():

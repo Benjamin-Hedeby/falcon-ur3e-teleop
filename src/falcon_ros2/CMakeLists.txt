@@ -31,6 +31,7 @@ install(PROGRAMS
   scripts/contact_limit.py
   scripts/record_trial.sh
   scripts/analyze_trial.py
+  scripts/fit_admittance.py
   scripts/move_to_ready.py
   scripts/position_hold_demo.py
   DESTINATION lib/${PROJECT_NAME})
